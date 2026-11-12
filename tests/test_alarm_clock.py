@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from freezegun.api import FrozenDateTimeFactory
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -26,6 +28,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .conftest import CT_LIGHT, ONOFF_LIGHT, SWITCH, WHITE_LIGHT, calls_for, travel
 
@@ -208,22 +211,22 @@ async def test_sunrise_alarm_and_lights_off(
     await travel(hass, berlin, "2026-11-12T06:29:00+01:00")
     assert calls == []
 
-    # 06:30: a dim, deep red glow.
+    # 06:30: a dim, deep red glow, switched on without a fade.
     await travel(hass, berlin, "2026-11-12T06:30:00+01:00")
     assert len(started) == 1
     first = calls_for(calls, CT_LIGHT)[0]
-    assert first["brightness"] == 1
+    assert first["brightness"] == 3
     assert first["hs_color"] == (0.0, 100.0)
-    assert first["transition"] == 9.0
+    assert first["transition"] == 0
     assert hass.states.get(STATUS).state == "sunrise"
 
-    # 06:45: half brightness, warm white; white light only gets brightness.
+    # 06:45: warm white, then half brightness; white light only gets brightness.
     await travel(hass, berlin, "2026-11-12T06:45:00+01:00")
-    middle = calls_for(calls, CT_LIGHT)[-1]
-    assert middle["brightness"] == 128
-    assert 2000 < middle["color_temp_kelvin"] < 4000
+    assert 2000 < calls_for(calls, CT_LIGHT)[-1]["color_temp_kelvin"] < 4000
     assert set(calls_for(calls, WHITE_LIGHT)[-1]) == {"entity_id", "brightness"}
     assert hass.states.get(STATUS).attributes["progress"] == 50
+    await travel(hass, berlin, "2026-11-12T06:45:09+01:00")
+    assert brightness(hass, CT_LIGHT) == 129
     assert calls_for(calls, ONOFF_LIGHT) == []
     assert calls_for(calls, SWITCH) == []
 
@@ -232,6 +235,7 @@ async def test_sunrise_alarm_and_lights_off(
     final = calls_for(calls, CT_LIGHT)[-1]
     assert final["brightness"] == 255
     assert final["color_temp_kelvin"] == 4000
+    assert "transition" not in final
     assert brightness(hass, WHITE_LIGHT) == 255
     assert hass.states.get(ONOFF_LIGHT).state == "on"
     assert hass.states.get(SWITCH).state == "on"
@@ -307,15 +311,43 @@ async def test_late_alarm_compresses_sunrise(
 ) -> None:
     # Set at 05:00 for 05:10: no 30 minutes left, so ramp from now instead of jumping to 66%.
     await create(hass, time="05:10")
-    assert calls_for(calls, CT_LIGHT)[0]["brightness"] == 1
+    assert calls_for(calls, CT_LIGHT)[0]["brightness"] == 3
     await travel(hass, berlin, "2026-11-12T05:05:00+01:00")
-    assert calls_for(calls, CT_LIGHT)[-1]["brightness"] == 128
+    await travel(hass, berlin, "2026-11-12T05:05:05+01:00")
+    assert brightness(hass, CT_LIGHT) == 130  # 255 * 305/600
+
+
+async def test_steps_never_fade_brightness_and_color_together(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    """Zigbee bulbs like IKEA's fade one thing at a time and drop the other."""
+    await create(hass, time="07:00", days=WEEKDAYS)
+    start = dt_util.parse_datetime("2026-11-12T06:30:00+01:00")
+    for step in range(11):
+        await travel(hass, berlin, (start + timedelta(seconds=9 * step)).isoformat())
+    await travel(hass, berlin, "2026-11-12T07:00:00+01:00")
+
+    first, *steps, final = calls_for(calls, CT_LIGHT)
+    assert first["transition"] == 0  # from off: no fade, no flash of the old color
+    for data in (first, *steps, final):
+        colored = "hs_color" in data or "color_temp_kelvin" in data
+        assert not (colored and data.get("transition")), data
+    kinds = ["brightness" if "brightness" in data else "color" for data in steps]
+    assert len(kinds) >= 8
+    assert kinds == ["color", "brightness"] * (len(kinds) // 2) + ["color"] * (
+        len(kinds) % 2
+    )
+    assert {data["transition"] for data in steps if "brightness" in data} == {7.2}
+    # Lights without colors fade the brightness on every step.
+    assert all("brightness" in data for data in calls_for(calls, WHITE_LIGHT))
 
 
 async def _sunrise_until_0640(hass: HomeAssistant, berlin: Freezer) -> None:
+    """A third into the sunrise (06:40, a color step, then a brightness step)."""
     await create(hass, time="07:00", days=WEEKDAYS)
     await travel(hass, berlin, "2026-11-12T06:30:00+01:00")
     await travel(hass, berlin, "2026-11-12T06:40:00+01:00")
+    await travel(hass, berlin, "2026-11-12T06:40:09+01:00")
 
 
 async def test_stop_restore(
@@ -328,7 +360,7 @@ async def test_stop_restore(
     stopped = async_capture_events(hass, EVENT_STOPPED)
     rang = async_capture_events(hass, EVENT_ALARM)
     await _sunrise_until_0640(hass, berlin)
-    assert brightness(hass, WHITE_LIGHT) == 85
+    assert brightness(hass, WHITE_LIGHT) == 86
 
     await stop(hass, "restore")
     assert hass.states.get(CT_LIGHT).state == "off"
@@ -430,10 +462,11 @@ async def test_restart_during_sunrise_continues(
     await hass.async_block_till_done()
     # Picks up on the original timeline: same progress, no dip in brightness.
     assert hass.states.get(STATUS).state == "sunrise"
-    assert hass.states.get(STATUS).attributes["progress"] == 33
-    assert brightness(hass, CT_LIGHT) == level
+    assert hass.states.get(STATUS).attributes["progress"] == 34
+    assert brightness(hass, CT_LIGHT) == level == 86
     await travel(hass, berlin, "2026-11-12T06:45:00+01:00")
-    assert brightness(hass, CT_LIGHT) == 128
+    await travel(hass, berlin, "2026-11-12T06:45:09+01:00")
+    assert brightness(hass, CT_LIGHT) == 129
 
     # The snapshot survived the restart: "as before" still knows the lights were off.
     await stop(hass, "restore")

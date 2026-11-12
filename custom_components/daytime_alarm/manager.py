@@ -83,6 +83,11 @@ STEPS = 200
 MIN_STEP = 5.0
 MIN_STEP_TEST = 1.0
 MAX_STEP = 30.0
+# Many Zigbee bulbs (IKEA, for one) can fade only one thing at a time: a command that
+# fades brightness and color together loses one of them. So on color lights the steps
+# take turns (color, then brightness), and a brightness fade ends this share of a step
+# early, so the next color change never arrives in the middle of it.
+FADE_SHARE = 0.8
 # A light whose brightness someone else moved this far from ours is theirs now.
 MANUAL_MARGIN = 25
 # A run restored after a restart still switches the lights off this long after
@@ -659,6 +664,7 @@ class WakeRun:
         self.touched = touched or set()
         self.released = released or set()
         self._last_set: dict[str, int] = {}
+        self._steps = 0
         span = max((end - start).total_seconds(), 0.0)
         min_step = MIN_STEP_TEST if alarm is None else MIN_STEP
         self.interval = max(min_step, min(MAX_STEP, span / STEPS))
@@ -796,9 +802,13 @@ class WakeRun:
         if not self._unsubs or self.phase is not Phase.SUNRISE:
             return
         self.progress = self._progress_at(now)
+        color_turn = self._steps % 2 == 1
+        self._steps += 1
         touched = len(self.touched)
         for entity_id in self.clock.lights:
-            await self._async_light(entity_id, self.progress, final=False)
+            await self._async_light(
+                entity_id, self.progress, final=False, color_turn=color_turn
+            )
         if len(self.touched) != touched:
             await self.clock.async_save()
         self.clock.notify_progress()
@@ -854,7 +864,7 @@ class WakeRun:
     # --- devices ----------------------------------------------------------
 
     async def _async_light(
-        self, entity_id: str, progress: float, *, final: bool
+        self, entity_id: str, progress: float, *, final: bool, color_turn: bool = False
     ) -> None:
         state = self.hass.states.get(entity_id)
         if entity_id in self.released or state is None or state.state in _GONE:
@@ -887,15 +897,34 @@ class WakeRun:
         params = sunrise_params(
             modes, state.attributes, progress, colors=self.clock.sunrise_colors
         )
-        features = state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
-        if features & LightEntityFeature.TRANSITION:
-            params[ATTR_TRANSITION] = (
-                min(self.interval, 2.0) if final else self.interval
-            )
-        self._last_set[entity_id] = target
+        colored = len(params) > 1
+        fades = bool(
+            state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
+            & LightEntityFeature.TRANSITION
+        )
+        if final:
+            # Alarm time, or "full brightness": go straight there.
+            data = params
+        elif state.state != STATE_ON:
+            # Switch on at the start values without a fade. Fading up from off makes
+            # many Zigbee bulbs show their last color (and brightness) first.
+            data = {**params, ATTR_TRANSITION: 0} if fades else params
+        elif colored and color_turn:
+            # Only the color, at once: the change per step is too small to see.
+            data = {
+                key: value for key, value in params.items() if key != ATTR_BRIGHTNESS
+            }
+        else:
+            data = {ATTR_BRIGHTNESS: target}
+            if fades:
+                data[ATTR_TRANSITION] = round(
+                    self.interval * (FADE_SHARE if colored else 1), 1
+                )
+        if ATTR_BRIGHTNESS in data:
+            self._last_set[entity_id] = target
         self.touched.add(entity_id)
         await self._async_call(
-            LIGHT_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: entity_id, **params}
+            LIGHT_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: entity_id, **data}
         )
 
     def _changed_by_someone_else(self, entity_id: str, state: State) -> bool:

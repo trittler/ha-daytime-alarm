@@ -47,6 +47,7 @@ const en = {
   editor_entry: "Wake-up light",
   editor_title: "Title",
   editor_show_devices: "Show devices",
+  picker_description: "Wake-up light with sunrise: all your alarms at a glance, switch them on and off, edit them.",
 };
 
 type Strings = typeof en;
@@ -98,6 +99,7 @@ const de: Strings = {
   editor_entry: "Lichtwecker",
   editor_title: "Titel",
   editor_show_devices: "Geräte anzeigen",
+  picker_description: "Lichtwecker mit Sonnenaufgang: alle Wecker auf einen Blick, ein- und ausschalten und bearbeiten.",
 };
 
 const STRINGS: Record<string, Strings> = { en, de };

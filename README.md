@@ -91,6 +91,27 @@ Details that make it pleasant to live with:
 - **One-time alarms** (no days selected) switch themselves off after ringing, like on your phone.
 - Uses light transitions where the light supports them, for a smooth ramp.
 
+### Zigbee bulbs (ZHA, Zigbee2MQTT, Hue bridge, deCONZ)
+
+Daytime Alarm controls lights through Home Assistant's normal light actions, so any Zigbee
+setup works. The sunrise is built for how Zigbee bulbs behave:
+
+- **No flash at the start.** A light that is off switches on at 1 % in the start color
+  without a fade; fading up from off makes many bulbs show yesterday's color and
+  brightness for a moment.
+- **Brightness and color take turns.** Many bulbs (IKEA's, for example) can fade only one
+  thing at a time and drop the other, so each step changes either the brightness (with a
+  fade) or the color (too small a change to see), never both at once.
+- **Starts at 1 %, not at the lowest level**: some bulbs switch off when sent brightness 1.
+- **Calm on the network**: at most one update per light every 5 seconds (about every 9 seconds
+  for a 30-minute sunrise).
+- **Bulbs without power** (wall switch off) are skipped and join in once they're back.
+
+Several bulbs in one room? Pick their **Zigbee group** (a ZHA group or a Zigbee2MQTT
+group) instead of the single bulbs: one command per step reaches all of them at once, so
+they stay in sync with less radio traffic. (A Home Assistant *light group* helper still
+sends to every bulb separately.)
+
 ## Installation
 
 ### HACS (recommended)
@@ -117,7 +138,12 @@ The card ships with the integration and registers itself; you don't add a dashbo
 
 1. *Settings → Devices & services → Add integration → Daytime Alarm* (or the button above).
 2. Give it a name (e.g. "Bedroom"), pick lights and switches, and choose how long the sunrise lasts.
-3. Edit a dashboard → *Add card* → **Daytime Alarm**.
+3. Edit a dashboard → *Add card* → **Daytime Alarm** (search for "Daytime" or "Wecker").
+
+Card not in the list? It comes with the integration, so add the integration first, then
+reload the page once (in the app: pull down). Home Assistant's *Suggested cards* only ever
+lists its built-in cards; tap the ☆ on the Daytime Alarm card in the picker to keep it at
+the top instead.
 
 Card options (all optional; the visual editor covers them):
 

@@ -707,7 +707,13 @@ if (!registry.customCards.some((card) => card.type === CARD_TYPE)) {
   registry.customCards.push({
     type: CARD_TYPE,
     name: "Daytime Alarm",
-    description: "Sunrise alarms: list, switch on/off and edit your wake-up light alarms.",
+    // A getter: the card picker reads it when it opens, once Home Assistant knows the
+    // user's language (so searching "Wecker" finds the card, too).
+    get description() {
+      const root = document.querySelector("home-assistant") as { hass?: HomeAssistant } | null;
+      return localize(root?.hass, "picker_description");
+    },
     preview: true,
+    documentationURL: "https://github.com/trittler/ha-daytime-alarm",
   });
 }

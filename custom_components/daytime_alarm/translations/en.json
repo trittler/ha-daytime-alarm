@@ -24,6 +24,9 @@
     },
     "error": {
       "no_devices": "Select at least one light or switch."
+    },
+    "create_entry": {
+      "default": "Done. To add the card, edit a dashboard, choose **Add card** and pick **Daytime Alarm**.\n\nNot in the list yet? Reload the page once (in the app: pull down)."
     }
   },
   "options": {

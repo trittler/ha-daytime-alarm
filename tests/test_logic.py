@@ -91,7 +91,7 @@ def test_dimmable() -> None:
 
 
 def test_brightness_range() -> None:
-    assert brightness_for(0) == 1
+    assert brightness_for(0) == 3  # ~1 %: some Zigbee bulbs turn off at 1
     assert brightness_for(0.5) == 128
     assert brightness_for(1) == 255
     assert brightness_for(2) == 255

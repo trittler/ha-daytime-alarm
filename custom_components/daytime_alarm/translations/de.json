@@ -24,6 +24,9 @@
     },
     "error": {
       "no_devices": "Wähle mindestens eine Lampe oder einen Schalter."
+    },
+    "create_entry": {
+      "default": "Fertig. Für die Karte ein Dashboard bearbeiten, **Karte hinzufügen** wählen und **Daytime Alarm** nehmen (Suche: „Wecker“).\n\nNoch nicht in der Liste? Lade die Seite einmal neu (in der App: nach unten ziehen)."
     }
   },
   "options": {

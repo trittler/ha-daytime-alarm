@@ -25,6 +25,8 @@ END_KELVIN = 4000
 RED_PHASE = 0.3
 START_HUE = 0.0
 START_SATURATION = 100.0
+# About 1 %. Some Zigbee bulbs switch off instead of dimming when sent brightness 1.
+MIN_BRIGHTNESS = 3
 
 _HS_MODES = {ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW, ColorMode.XY}
 
@@ -36,8 +38,8 @@ def is_dimmable(color_modes: Iterable[str] | None) -> bool:
 
 
 def brightness_for(progress: float) -> int:
-    """Brightness (1-255) for a ramp progress between 0 and 1."""
-    return max(1, min(255, round(255 * _clamp(progress))))
+    """Brightness (MIN_BRIGHTNESS-255) for a ramp progress between 0 and 1."""
+    return max(MIN_BRIGHTNESS, min(255, round(255 * _clamp(progress))))
 
 
 def sunrise_params(
