@@ -40,7 +40,7 @@ Requires Home Assistant **2026.11** or newer.
   | `button.<name>_stop_lights_as_before` | Stop the alarm; lights go back to how they were before the sunrise |
   | `button.<name>_stop_full_brightness` | Stop the alarm; lights to full brightness |
   | `button.<name>_stop_all_lights_off` | Stop the alarm; all lights off |
-  | `button.<name>_test_sunrise` | One-minute sunrise with your lights, then back to how they were (switches are left alone) |
+  | `button.<name>_test_sunrise` | One-minute sunrise with your lights, starting from dark even if they are on, then back to how they were (switches are left alone) |
 
   (Entity IDs follow your Home Assistant language, e.g. `sensor.schlafzimmer_status`.)
 
@@ -82,8 +82,11 @@ Turn off *Sunrise colors* to change brightness only.
 Details that make it pleasant to live with:
 
 - **Never dims a light down.** A light that is already brighter is left alone until the
-  sunrise catches up.
-- **Respects you.** Turn a light off (or dim it) during the sunrise and it is left alone.
+  sunrise catches up. (So a real alarm a few minutes ahead with the lamp on seems to do
+  nothing; to see the sunrise, use *Test sunrise*, which starts from dark.)
+- **Respects you.** Turn a light off (or dim it) during the sunrise, in the app, by voice,
+  with an automation or with a remote, and it is left alone, even if the sunrise hadn't
+  reached it yet.
 - **Late alarms ramp from dark.** Set an alarm for 10 minutes from now and the lights
   start at 1 % instead of jumping to 66 %.
 - **Survives restarts.** If Home Assistant restarts mid-sunrise it continues where it
@@ -106,6 +109,10 @@ setup works. The sunrise is built for how Zigbee bulbs behave:
 - **Calm on the network**: at most one update per light every 5 seconds (about every 9 seconds
   for a 30-minute sunrise).
 - **Bulbs without power** (wall switch off) are skipped and join in once they're back.
+- **Slow bulbs are fine.** Some take several seconds per command and report back late.
+  The sunrise waits for each light's answer before the next step, and a change that only
+  the bulb reports (a remote paired straight to it, or just a stray report) has to last
+  20 seconds before the light counts as switched by you.
 
 Several bulbs in one room? Pick their **Zigbee group** (a ZHA group or a Zigbee2MQTT
 group) instead of the single bulbs: one command per step reaches all of them at once, so

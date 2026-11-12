@@ -24,7 +24,7 @@ from custom_components.daytime_alarm.const import (
 )
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -506,3 +506,103 @@ async def test_test_run_restores_lights(
     for light in (CT_LIGHT, WHITE_LIGHT, ONOFF_LIGHT):
         assert hass.states.get(light).state == "off"
     assert hass.states.get(STATUS).state == "idle"
+
+
+# --- slow and manually changed lights (Zigbee) -------------------------------------
+
+
+async def test_light_switched_off_before_the_sunrise_reached_it(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    """Brighter than the sunrise, then switched off in the app: it stays off."""
+    attrs = dict(hass.states.get(CT_LIGHT).attributes)
+    hass.states.async_set(CT_LIGHT, "on", {**attrs, "brightness": 254})
+    await create(hass, time="07:00", days=WEEKDAYS)
+    await travel(hass, berlin, "2026-11-12T06:30:00+01:00")
+    assert calls_for(calls, CT_LIGHT) == []  # brighter: left alone
+
+    berlin.move_to("2026-11-12T06:35:00+01:00")
+    hass.states.async_set(CT_LIGHT, "off", attrs, context=Context(user_id="someone"))
+    for moment in ("06:35:05", "06:45:00", "06:59:59", "07:00:00"):
+        await travel(hass, berlin, f"2026-11-12T{moment}+01:00")
+    assert calls_for(calls, CT_LIGHT) == []
+    assert hass.states.get(CT_LIGHT).state == "off"
+
+
+async def test_slow_light_is_not_taken_for_a_manual_change(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    """A bulb that reports back seconds later is neither dropped nor flooded."""
+    attrs = dict(hass.states.get(CT_LIGHT).attributes)
+    # Switched off in the app last night.
+    hass.states.async_set(CT_LIGHT, "off", attrs, context=Context(user_id="someone"))
+    slow: list[ServiceCall] = []
+
+    async def slow_turn_on(call: ServiceCall) -> None:
+        slow.append(call)  # the state only changes later
+
+    hass.services.async_register("light", "turn_on", slow_turn_on)
+    await create(hass, time="07:00", days=WEEKDAYS)
+    await travel(hass, berlin, "2026-11-12T06:30:00+01:00")
+    assert len(calls_for(slow, CT_LIGHT)) == 1
+
+    # The state still says "switched off in the app": no reason to give up or resend.
+    await travel(hass, berlin, "2026-11-12T06:30:09+01:00")
+    await travel(hass, berlin, "2026-11-12T06:30:18+01:00")
+    assert len(calls_for(slow, CT_LIGHT)) == 1
+
+    # The bulb reports at last, too late to carry our context.
+    hass.states.async_set(CT_LIGHT, "on", {**attrs, "brightness": 3})
+    await travel(hass, berlin, "2026-11-12T06:30:27+01:00")
+    assert len(calls_for(slow, CT_LIGHT)) == 2
+
+
+async def test_off_report_from_the_bulb_itself(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    """A stray report waits and passes; a remote paired to the bulb wins after 20 s."""
+    await _sunrise_until_0640(hass, berlin)
+    attrs = dict(hass.states.get(CT_LIGHT).attributes)
+    count = len(calls_for(calls, CT_LIGHT))
+
+    # A stray "off", back on a moment later: wait, then carry on.
+    hass.states.async_set(CT_LIGHT, "off", attrs)
+    await travel(hass, berlin, "2026-11-12T06:40:18+01:00")
+    assert len(calls_for(calls, CT_LIGHT)) == count
+    hass.states.async_set(CT_LIGHT, "on", attrs)
+    await travel(hass, berlin, "2026-11-12T06:40:27+01:00")
+    assert len(calls_for(calls, CT_LIGHT)) == count + 1
+
+    # Switched off at the bulb, and it stays off: left alone, also at the alarm.
+    hass.states.async_set(CT_LIGHT, "off", hass.states.get(CT_LIGHT).attributes)
+    for moment in ("06:40:36", "06:40:45", "06:40:54", "06:41:03", "06:45", "07:00"):
+        await travel(hass, berlin, f"2026-11-12T{moment}+01:00")
+    assert len(calls_for(calls, CT_LIGHT)) == count + 1
+    assert hass.states.get(CT_LIGHT).state == "off"
+
+
+async def test_test_run_starts_dark_even_if_a_light_is_on(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    attrs = dict(hass.states.get(CT_LIGHT).attributes)
+    hass.states.async_set(
+        CT_LIGHT,
+        "on",
+        {
+            **attrs,
+            "brightness": 254,
+            "color_mode": "color_temp",
+            "color_temp_kelvin": 3000,
+        },
+    )
+    await hass.services.async_call(
+        "button", "press", {"entity_id": "button.bedroom_test_sunrise"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    first = calls_for(calls, CT_LIGHT)[0]
+    assert (first["brightness"], first["transition"]) == (3, 0)
+
+    await travel(hass, berlin, "2026-11-12T05:01:00+01:00")
+    assert brightness(hass, CT_LIGHT) == 255
+    await travel(hass, berlin, "2026-11-12T05:01:10+01:00")
+    assert brightness(hass, CT_LIGHT) == 254

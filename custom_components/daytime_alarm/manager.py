@@ -12,10 +12,11 @@ the sunrise, go to full brightness, or switch them all off.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from enum import StrEnum
+import asyncio
 import logging
 from typing import Any
 import uuid
@@ -90,11 +91,27 @@ MAX_STEP = 30.0
 FADE_SHARE = 0.8
 # A light whose brightness someone else moved this far from ours is theirs now.
 MANUAL_MARGIN = 25
+# Zigbee lights can take several seconds to carry out a command, and their late or
+# in-between reports no longer carry our context. So a light is only judged on states it
+# reported after our last command (or after this long, if it never reports back) ...
+PENDING_TIMEOUT = timedelta(seconds=30)
+# ... and a change that comes from the device itself (a remote paired straight to the
+# bulb, or just a late report) must last this long before the light counts as taken
+# over. A change made in Home Assistant (a person, an automation) counts at once.
+SETTLE_TIME = timedelta(seconds=20)
+# Before restoring or switching off, wait at most this long for commands on their way.
+INFLIGHT_WAIT = 15
 # A run restored after a restart still switches the lights off this long after
 # its planned moment; older runs are dropped.
 LATE_OFF_GRACE = timedelta(hours=1)
 
 _GONE = (STATE_UNAVAILABLE, STATE_UNKNOWN)
+
+
+class _Verdict(StrEnum):
+    OURS = "ours"
+    WAIT = "wait"
+    THEIRS = "theirs"
 
 
 class Phase(StrEnum):
@@ -664,7 +681,11 @@ class WakeRun:
         self.touched = touched or set()
         self.released = released or set()
         self._last_set: dict[str, int] = {}
+        self._sent_at: dict[str, datetime] = {}
+        self._inflight: dict[str, asyncio.Task[None]] = {}
+        self._suspect: dict[str, datetime] = {}
         self._steps = 0
+        self._started_at = dt_util.utcnow()
         span = max((end - start).total_seconds(), 0.0)
         min_step = MIN_STEP_TEST if alarm is None else MIN_STEP
         self.interval = max(min_step, min(MAX_STEP, span / STEPS))
@@ -769,11 +790,11 @@ class WakeRun:
     async def async_stop(self, action: str) -> None:
         """Someone stopped the alarm: do what they chose with the lights."""
         self.async_cancel()
+        await self._async_wait_inflight()
         if action == STOP_RESTORE:
             await self._async_restore()
         elif action == STOP_FULL:
-            for entity_id in self.clock.lights:
-                await self._async_light(entity_id, 1.0, final=True)
+            await self._async_all_lights_full()
         elif action == STOP_OFF:
             await self._async_turn_off(
                 [
@@ -806,9 +827,14 @@ class WakeRun:
         self._steps += 1
         touched = len(self.touched)
         for entity_id in self.clock.lights:
-            await self._async_light(
-                entity_id, self.progress, final=False, color_turn=color_turn
+            data = self._light_command(
+                entity_id, self.progress, now, final=False, color_turn=color_turn
             )
+            if data is not None:
+                # Not awaited: one slow bulb must not hold up the others.
+                self._inflight[entity_id] = self.clock.entry.async_create_task(
+                    self.hass, self._async_send(entity_id, data), f"{DOMAIN} light"
+                )
         if len(self.touched) != touched:
             await self.clock.async_save()
         self.clock.notify_progress()
@@ -817,8 +843,7 @@ class WakeRun:
         """Alarm time: everything on, then wait to switch the lights off."""
         self.async_cancel()
         self.progress = 1.0
-        for entity_id in self.clock.lights:
-            await self._async_light(entity_id, 1.0, final=True)
+        jobs = [self._async_all_lights_full()]
         if not self.is_test:
             # The test run only shows the light ramp; it never starts e.g. a coffee machine.
             switches = [
@@ -828,13 +853,17 @@ class WakeRun:
                 and state.state != STATE_UNAVAILABLE
             ]
             if switches:
-                await self._async_call(
-                    "homeassistant", SERVICE_TURN_ON, {ATTR_ENTITY_ID: switches}
+                jobs.append(
+                    self._async_call(
+                        "homeassistant", SERVICE_TURN_ON, {ATTR_ENTITY_ID: switches}
+                    )
                 )
             assert self.alarm is not None
             self.hass.bus.async_fire(
                 EVENT_ALARM, self.clock.event_data(self.alarm, self.end)
             )
+        # Lights and switches together, so a slow bulb doesn't delay the coffee.
+        await asyncio.gather(*jobs)
 
         hold = (
             timedelta(seconds=TEST_HOLD_SECONDS)
@@ -855,6 +884,7 @@ class WakeRun:
     async def _async_lights_out(self, _now: datetime) -> None:
         """Nobody stopped the alarm: lights off (a test goes back to before)."""
         self.async_cancel()
+        await self._async_wait_inflight()
         if self.is_test:
             await self._async_restore()
         else:
@@ -863,26 +893,62 @@ class WakeRun:
 
     # --- devices ----------------------------------------------------------
 
-    async def _async_light(
-        self, entity_id: str, progress: float, *, final: bool, color_turn: bool = False
-    ) -> None:
-        state = self.hass.states.get(entity_id)
-        if entity_id in self.released or state is None or state.state in _GONE:
-            return
-        if self._changed_by_someone_else(entity_id, state):
-            _LOGGER.debug("%s was changed manually, leaving it alone", entity_id)
-            self.released.add(entity_id)
-            return
+    async def _async_all_lights_full(self) -> None:
+        """Every light to 100 % (alarm time, or "full brightness")."""
+        now = dt_util.utcnow()
+        jobs = []
+        for entity_id in self.clock.lights:
+            if (task := self._inflight.get(entity_id)) is not None and not task.done():
+                await asyncio.wait({task}, timeout=INFLIGHT_WAIT)
+            data = self._light_command(entity_id, 1.0, now, final=True)
+            if data is not None:
+                jobs.append(self._async_send(entity_id, data))
+        await asyncio.gather(*jobs)
 
+    def _light_command(
+        self,
+        entity_id: str,
+        progress: float,
+        now: datetime,
+        *,
+        final: bool,
+        color_turn: bool = False,
+    ) -> dict[str, Any] | None:
+        """light.turn_on data for one light now, or None to leave it this time."""
+        state = self.hass.states.get(entity_id)
+        if not self._may_control(entity_id, state, now, final=final):
+            return None
+        assert state is not None
+        return self._sunrise_data(
+            entity_id, state, progress, final=final, color_turn=color_turn
+        )
+
+    def _may_control(
+        self, entity_id: str, state: State | None, now: datetime, *, final: bool
+    ) -> bool:
+        if entity_id in self.released or state is None or state.state in _GONE:
+            return False
+        if not final and not self._settled(entity_id, state, now):
+            return False
+        verdict = self._judge(entity_id, state, now)
+        if verdict is _Verdict.THEIRS:
+            _LOGGER.debug("%s was changed by someone else, leaving it alone", entity_id)
+            self.released.add(entity_id)
+        return verdict is _Verdict.OURS
+
+    def _sunrise_data(
+        self,
+        entity_id: str,
+        state: State,
+        progress: float,
+        *,
+        final: bool,
+        color_turn: bool,
+    ) -> dict[str, Any] | None:
         modes = state.attributes.get(ATTR_SUPPORTED_COLOR_MODES)
         if not is_dimmable(modes):
             # On/off-only lights behave like switches: on at alarm time.
-            if final and state.state != STATE_ON:
-                self.touched.add(entity_id)
-                await self._async_call(
-                    LIGHT_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: entity_id}
-                )
-            return
+            return {} if final and state.state != STATE_ON else None
 
         target = brightness_for(progress)
         current = (
@@ -890,9 +956,11 @@ class WakeRun:
             if state.state == STATE_ON
             else 0
         )
-        if current >= target:
+        # The test always shows the whole sunrise; the lights go back afterwards.
+        takeover = self.is_test and entity_id not in self.touched
+        if current >= target and not takeover:
             # Never dim a light down (e.g. it was already on, or another alarm is ahead).
-            return
+            return None
 
         params = sunrise_params(
             modes, state.attributes, progress, colors=self.clock.sunrise_colors
@@ -904,37 +972,74 @@ class WakeRun:
         )
         if final:
             # Alarm time, or "full brightness": go straight there.
-            data = params
-        elif state.state != STATE_ON:
+            return params
+        if state.state != STATE_ON or takeover:
             # Switch on at the start values without a fade. Fading up from off makes
             # many Zigbee bulbs show their last color (and brightness) first.
-            data = {**params, ATTR_TRANSITION: 0} if fades else params
-        elif colored and color_turn:
+            return {**params, ATTR_TRANSITION: 0} if fades else params
+        if colored and color_turn:
             # Only the color, at once: the change per step is too small to see.
-            data = {
+            return {
                 key: value for key, value in params.items() if key != ATTR_BRIGHTNESS
             }
+        data: dict[str, Any] = {ATTR_BRIGHTNESS: target}
+        if fades:
+            data[ATTR_TRANSITION] = round(
+                self.interval * (FADE_SHARE if colored else 1), 1
+            )
+        return data
+
+    def _settled(self, entity_id: str, state: State, now: datetime) -> bool:
+        """True once the light has carried out (and reported) our last command."""
+        if (task := self._inflight.get(entity_id)) is not None and not task.done():
+            return False
+        sent = self._sent_at.get(entity_id)
+        return (
+            sent is None or state.last_reported >= sent or now - sent > PENDING_TIMEOUT
+        )
+
+    def _judge(self, entity_id: str, state: State, now: datetime) -> _Verdict:
+        """Is the light still ours, or did someone else change it?"""
+        if state.context.id == self.context.id:
+            self._suspect.pop(entity_id, None)
+            return _Verdict.OURS
+        last = self._last_set.get(entity_id)
+        if state.state == STATE_OFF:
+            # Off although we switched it on, or switched off during the sunrise.
+            changed = (
+                last is not None
+                or entity_id in self.touched
+                or state.last_changed > self._started_at
+            )
         else:
-            data = {ATTR_BRIGHTNESS: target}
-            if fades:
-                data[ATTR_TRANSITION] = round(
-                    self.interval * (FADE_SHARE if colored else 1), 1
-                )
+            brightness = state.attributes.get(ATTR_BRIGHTNESS)
+            changed = (
+                last is not None
+                and brightness is not None
+                and abs(brightness - last) > MANUAL_MARGIN
+            )
+        if not changed:
+            self._suspect.pop(entity_id, None)
+            return _Verdict.OURS
+        if state.context.user_id or state.context.parent_id:
+            return _Verdict.THEIRS  # a person, an automation or a script
+        since = self._suspect.setdefault(entity_id, now)
+        return _Verdict.THEIRS if now - since >= SETTLE_TIME else _Verdict.WAIT
+
+    def _async_send(self, entity_id: str, data: dict[str, Any]) -> Awaitable[None]:
+        """Note what we send (right away), then send it."""
         if ATTR_BRIGHTNESS in data:
-            self._last_set[entity_id] = target
+            self._last_set[entity_id] = data[ATTR_BRIGHTNESS]
         self.touched.add(entity_id)
-        await self._async_call(
+        self._sent_at[entity_id] = dt_util.utcnow()
+        return self._async_call(
             LIGHT_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: entity_id, **data}
         )
 
-    def _changed_by_someone_else(self, entity_id: str, state: State) -> bool:
-        last = self._last_set.get(entity_id)
-        if last is None or state.context.id == self.context.id:
-            return False
-        if state.state == STATE_OFF:
-            return True
-        brightness = state.attributes.get(ATTR_BRIGHTNESS)
-        return brightness is not None and abs(brightness - last) > MANUAL_MARGIN
+    async def _async_wait_inflight(self) -> None:
+        tasks = {task for task in self._inflight.values() if not task.done()}
+        if tasks:
+            await asyncio.wait(tasks, timeout=INFLIGHT_WAIT)
 
     def _lights_still_ours(self) -> list[str]:
         """Lights this run switched on that are still on as it left them."""
@@ -976,7 +1081,7 @@ class WakeRun:
     ) -> None:
         try:
             await self.hass.services.async_call(
-                domain, service, data, blocking=False, context=self.context
+                domain, service, data, blocking=True, context=self.context
             )
         except (HomeAssistantError, vol.Invalid) as err:
             _LOGGER.warning(

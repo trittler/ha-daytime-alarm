@@ -62,4 +62,6 @@ checked end to end on the dev instance.
 
 ## prod
 
-Not set up yet: the user's own Home Assistant instance (host, access, install method) is unknown.
+The user's own Home Assistant (installs through HACS from the GitHub releases). Its address,
+access and notes are in `INFRA.local.md` (gitignored: this repo is public, so details of the
+user's network stay out of it).

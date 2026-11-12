@@ -6,3 +6,5 @@ dev/config/*
 dev/.dev-credentials
 .venv/
 .ruff_cache/
+dev/.prod-credentials
+INFRA.local.md
