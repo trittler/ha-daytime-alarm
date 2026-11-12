@@ -64,15 +64,20 @@ After the alarm the lights stay on and turn **off 30 minutes after the alarm tim
 meantime, and lights that were already fully on before the sunrise, are left alone.
 Switches stay on.
 
+Whenever the alarm switches lights off, it first gives them back **their usual brightness
+and color** (how you last set them yourself), so switched on later they aren't stuck in
+the sunrise's cool white. (Brightness is only set back if that isn't brighter than the
+light is at that moment, so there's no flash in a dark room.)
+
 ### Stopping
 
 **Stop** (during the sunrise or while the lights are on after the alarm) asks what to do:
 
 | Choice | Lights |
 | --- | --- |
-| **As before** | Back to exactly how they were before the sunrise (on/off, brightness, color) |
+| **As before** | Back to exactly how they were before the sunrise (on/off, brightness, color; lights that were off get their usual color back, then go off) |
 | **Full brightness** | 100 % |
-| **All off** | All the wake-up light's lamps off |
+| **All off** | All the wake-up light's lamps off (in their usual color) |
 
 After a stop nothing else happens for that alarm: no automatic lights-off, and switches
 that were not on yet stay off. One-time alarms switch themselves off.
@@ -92,6 +97,8 @@ Details that make it pleasant to live with:
 - **Survives restarts.** If Home Assistant restarts mid-sunrise it continues where it
   was; the lights still turn off on time, and "As before" still knows the earlier state.
 - **One-time alarms** (no days selected) switch themselves off after ringing, like on your phone.
+- **Switch an alarm off, change its time or delete it during its sunrise** and the lights
+  go back to how they were.
 - Uses light transitions where the light supports them, for a smooth ramp.
 
 ### Zigbee bulbs (ZHA, Zigbee2MQTT, Hue bridge, deCONZ)

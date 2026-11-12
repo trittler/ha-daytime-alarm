@@ -606,3 +606,125 @@ async def test_test_run_starts_dark_even_if_a_light_is_on(
     assert brightness(hass, CT_LIGHT) == 255
     await travel(hass, berlin, "2026-11-12T05:01:10+01:00")
     assert brightness(hass, CT_LIGHT) == 254
+
+
+# --- lights go back to how you use them -------------------------------------------
+
+USUAL = {"brightness": 120, "color_temp_kelvin": 2700}
+
+
+def _use_ceiling_light_in_the_evening(hass: HomeAssistant) -> None:
+    """Warm white at about half brightness, switched off for the night."""
+    attrs = dict(hass.states.get(CT_LIGHT).attributes)
+    user = Context(user_id="someone")
+    hass.states.async_set(
+        CT_LIGHT, "on", {**attrs, **USUAL, "color_mode": "color_temp"}, context=user
+    )
+    hass.states.async_set(CT_LIGHT, "off", attrs, context=user)
+
+
+def _last_two(calls: Calls, entity_id: str) -> list[tuple[str, dict]]:
+    """The last two service calls for a light, without the entity id."""
+    mine = []
+    for call in calls:
+        ids = call.data["entity_id"]
+        if entity_id in ([ids] if isinstance(ids, str) else ids):
+            data = {k: v for k, v in call.data.items() if k != "entity_id"}
+            mine.append((call.service, data))
+    return mine[-2:]
+
+
+async def test_lights_off_puts_back_the_usual_color(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    _use_ceiling_light_in_the_evening(hass)
+    assert entry.runtime_data.remembered[CT_LIGHT] == USUAL
+
+    await create(hass, time="07:00", days=WEEKDAYS)
+    for moment in ("06:30", "06:45", "07:00", "07:30"):
+        await travel(hass, berlin, f"2026-11-12T{moment}:00+01:00")
+
+    # Warm white at its usual brightness again, then off: switched on later, it isn't
+    # stuck in the sunrise's cool white.
+    assert _last_two(calls, CT_LIGHT) == [
+        ("turn_on", {**USUAL, "transition": 0}),
+        ("turn_off", {}),
+    ]
+    assert hass.states.get(CT_LIGHT).state == "off"
+    # The sunrise's own changes are not taken for the usual settings.
+    assert entry.runtime_data.remembered[CT_LIGHT] == USUAL
+
+
+async def test_as_before_in_the_dark_sets_only_the_color(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    _use_ceiling_light_in_the_evening(hass)
+    await _sunrise_until_0640(hass, berlin)  # ceiling at 86 of 255
+    await stop(hass, "restore")
+    # Not up to 120 for a moment in the dark bedroom: the color is enough.
+    assert _last_two(calls, CT_LIGHT) == [
+        ("turn_on", {"color_temp_kelvin": 2700, "transition": 0}),
+        ("turn_off", {}),
+    ]
+    assert hass.states.get(CT_LIGHT).state == "off"
+
+
+async def test_all_off_puts_back_the_usual_color(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    _use_ceiling_light_in_the_evening(hass)
+    await _sunrise_until_0640(hass, berlin)
+    await travel(hass, berlin, "2026-11-12T07:00:00+01:00")
+    await stop(hass, "off")
+    assert _last_two(calls, CT_LIGHT) == [
+        ("turn_on", {**USUAL, "transition": 0}),
+        ("turn_off", {}),
+    ]
+
+
+async def test_switching_the_alarm_off_during_the_sunrise(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    _use_ceiling_light_in_the_evening(hass)
+    await _sunrise_until_0640(hass, berlin)
+    await hass.services.async_call(
+        "switch", "turn_off", {"entity_id": ALARM}, blocking=True
+    )
+    await hass.async_block_till_done()
+    # The lights go back to how they were instead of staying half-way.
+    for light in (CT_LIGHT, WHITE_LIGHT):
+        assert hass.states.get(light).state == "off"
+    assert _last_two(calls, CT_LIGHT)[0][1]["color_temp_kelvin"] == 2700
+    assert hass.states.get(STATUS).state == "idle"
+    assert hass.states.get(ALARM).state == "off"
+
+
+async def test_moving_a_one_time_alarm_during_its_sunrise(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    await create(hass, time="07:00")
+    await travel(hass, berlin, "2026-11-12T06:30:00+01:00")
+    await travel(hass, berlin, "2026-11-12T06:40:00+01:00")
+    await hass.services.async_call(
+        DOMAIN,
+        "update_alarm",
+        {"time": "08:00"},
+        target={"entity_id": ALARM},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    # Dark again until the new sunrise; the alarm stays on for 08:00.
+    assert hass.states.get(CT_LIGHT).state == "off"
+    assert hass.states.get(ALARM).state == "on"
+    assert hass.states.get(NEXT).state == "2026-11-12T07:00:00+00:00"
+    await travel(hass, berlin, "2026-11-12T07:30:00+01:00")
+    assert hass.states.get(STATUS).state == "sunrise"
+
+
+async def test_usual_settings_survive_a_restart(
+    hass: HomeAssistant, entry: MockConfigEntry, berlin: Freezer, calls: Calls
+) -> None:
+    _use_ceiling_light_in_the_evening(hass)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.remembered[CT_LIGHT] == USUAL

@@ -18,7 +18,7 @@
           "switches": "Turn on at the alarm time, e.g. a coffee machine or a radio.",
           "duration": "How long before the alarm the lights start to brighten.",
           "sunrise_colors": "Color lights glow from deep red through orange to white; white lights go from warm to neutral white. When off, only the brightness changes.",
-          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
+          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time, back in their usual brightness and color. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
         }
       }
     },
@@ -46,7 +46,7 @@
           "switches": "Turn on at the alarm time, e.g. a coffee machine or a radio.",
           "duration": "How long before the alarm the lights start to brighten.",
           "sunrise_colors": "Color lights glow from deep red through orange to white; white lights go from warm to neutral white. When off, only the brightness changes.",
-          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
+          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time, back in their usual brightness and color. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
         }
       }
     },

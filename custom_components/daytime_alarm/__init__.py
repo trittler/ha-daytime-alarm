@@ -65,6 +65,8 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: DaytimeAlarmConfigEntry
 ) -> bool:
     """Unload an alarm clock."""
+    # Write now: a delayed write of this clock must not land after its successor loads.
+    await entry.runtime_data.async_save()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

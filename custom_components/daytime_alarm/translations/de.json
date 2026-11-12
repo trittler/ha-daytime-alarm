@@ -18,7 +18,7 @@
           "switches": "Gehen zur Weckzeit an, z. B. Kaffeemaschine oder Radio.",
           "duration": "Wie lange vor der Weckzeit die Lampen heller werden.",
           "sunrise_colors": "Farbige Lampen glühen erst tiefrot, dann orange und zuletzt weiß; weiße Lampen gehen von warm- zu neutralweiß. Aus: nur die Helligkeit ändert sich.",
-          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
+          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus, vorher bekommen sie ihre gewohnte Helligkeit und Farbe zurück. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
         }
       }
     },
@@ -46,7 +46,7 @@
           "switches": "Gehen zur Weckzeit an, z. B. Kaffeemaschine oder Radio.",
           "duration": "Wie lange vor der Weckzeit die Lampen heller werden.",
           "sunrise_colors": "Farbige Lampen glühen erst tiefrot, dann orange und zuletzt weiß; weiße Lampen gehen von warm- zu neutralweiß. Aus: nur die Helligkeit ändert sich.",
-          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
+          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus, vorher bekommen sie ihre gewohnte Helligkeit und Farbe zurück. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
         }
       }
     },

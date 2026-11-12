@@ -10,10 +10,15 @@ from typing import Any
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
+    ATTR_COLOR_MODE,
     ATTR_COLOR_TEMP_KELVIN,
     ATTR_HS_COLOR,
     ATTR_MAX_COLOR_TEMP_KELVIN,
     ATTR_MIN_COLOR_TEMP_KELVIN,
+    ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ATTR_RGBWW_COLOR,
+    ATTR_XY_COLOR,
     ColorMode,
 )
 from homeassistant.util import color as color_util
@@ -29,6 +34,15 @@ START_SATURATION = 100.0
 MIN_BRIGHTNESS = 3
 
 _HS_MODES = {ColorMode.HS, ColorMode.RGB, ColorMode.RGBW, ColorMode.RGBWW, ColorMode.XY}
+# The attribute that holds a light's color in each color mode.
+_COLOR_KEYS = {
+    ColorMode.COLOR_TEMP: ATTR_COLOR_TEMP_KELVIN,
+    ColorMode.HS: ATTR_HS_COLOR,
+    ColorMode.XY: ATTR_XY_COLOR,
+    ColorMode.RGB: ATTR_RGB_COLOR,
+    ColorMode.RGBW: ATTR_RGBW_COLOR,
+    ColorMode.RGBWW: ATTR_RGBWW_COLOR,
+}
 
 
 def is_dimmable(color_modes: Iterable[str] | None) -> bool:
@@ -40,6 +54,17 @@ def is_dimmable(color_modes: Iterable[str] | None) -> bool:
 def brightness_for(progress: float) -> int:
     """Brightness (MIN_BRIGHTNESS-255) for a ramp progress between 0 and 1."""
     return max(MIN_BRIGHTNESS, min(255, round(255 * _clamp(progress))))
+
+
+def light_settings(attributes: Mapping[str, Any]) -> dict[str, Any]:
+    """Brightness and color of a light that is on, as light.turn_on data."""
+    settings: dict[str, Any] = {}
+    if (brightness := attributes.get(ATTR_BRIGHTNESS)) is not None:
+        settings[ATTR_BRIGHTNESS] = int(brightness)
+    key = _COLOR_KEYS.get(attributes.get(ATTR_COLOR_MODE))  # type: ignore[call-overload]
+    if key is not None and (value := attributes.get(key)) is not None:
+        settings[key] = list(value) if isinstance(value, (list, tuple)) else value
+    return settings
 
 
 def sunrise_params(

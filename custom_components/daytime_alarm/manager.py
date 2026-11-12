@@ -39,11 +39,20 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, State, callback
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    Context,
+    Event,
+    EventStateChangedData,
+    HomeAssistant,
+    State,
+    callback,
+)
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_point_in_time,
+    async_track_state_change_event,
     async_track_time_interval,
 )
 from homeassistant.helpers.state import async_reproduce_state
@@ -74,7 +83,7 @@ from .const import (
     TEST_HOLD_SECONDS,
     WEEKDAYS,
 )
-from .sunrise import brightness_for, is_dimmable, sunrise_params
+from .sunrise import brightness_for, is_dimmable, light_settings, sunrise_params
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,6 +110,11 @@ PENDING_TIMEOUT = timedelta(seconds=30)
 SETTLE_TIME = timedelta(seconds=20)
 # Before restoring or switching off, wait at most this long for commands on their way.
 INFLIGHT_WAIT = 15
+# How long after a wake-up let go of a light its (late) reports don't count as the
+# user's own settings.
+QUIET_TIME = timedelta(minutes=1)
+# Remembered light settings are written to disk at most this often (seconds).
+SAVE_DELAY = 10
 # A run restored after a restart still switches the lights off this long after
 # its planned moment; older runs are dropped.
 LATE_OFF_GRACE = timedelta(hours=1)
@@ -230,6 +244,11 @@ class AlarmClock:
         self._listeners: list[Callable[[], None]] = []
         self._progress_listeners: list[Callable[[], None]] = []
         self._added_listeners: list[Callable[[Alarm], None]] = []
+        # How each light was last set outside a wake-up (brightness and color): a light
+        # that is off doesn't show its color, so this is what "as before" puts back.
+        self.remembered: dict[str, dict[str, Any]] = {}
+        self._quiet_until: dict[str, datetime] = {}
+        self._unsub_lights: CALLBACK_TYPE | None = None
 
     # --- settings ---------------------------------------------------------
 
@@ -277,6 +296,11 @@ class AlarmClock:
                 continue
             self.alarms[alarm.id] = alarm
         self._saved_runs = list(data.get("runs", []))
+        self.remembered = {
+            entity_id: dict(settings)
+            for entity_id, settings in (data.get("lights") or {}).items()
+            if isinstance(settings, dict)
+        }
 
     @callback
     def async_start(self) -> None:
@@ -294,6 +318,7 @@ class AlarmClock:
         for alarm_id in list(self.alarms):
             # A sunrise that started while HA was down continues on its timeline.
             self._schedule(alarm_id, resume=True)
+        self._track_lights()
         self.entry.async_create_task(self.hass, self.async_save())
         self._notify()
 
@@ -303,6 +328,9 @@ class AlarmClock:
         for unsub in self._timers.values():
             unsub()
         self._timers.clear()
+        if self._unsub_lights is not None:
+            self._unsub_lights()
+            self._unsub_lights = None
         for run in self.runs.values():
             run.async_cancel()
         self.runs.clear()
@@ -316,18 +344,19 @@ class AlarmClock:
         """Settings changed: the sunrise length may have moved start times."""
         for alarm_id in list(self.alarms):
             self._schedule(alarm_id, resume=True)
+        self._track_lights()
         self._notify()
 
     async def async_save(self) -> None:
         """Store alarms and running wake-ups (so they survive a restart)."""
-        await self._store.async_save(
-            {
-                "alarms": [alarm.as_dict() for alarm in self.alarms.values()],
-                "runs": [
-                    run.as_dict() for run in self.runs.values() if not run.is_test
-                ],
-            }
-        )
+        await self._store.async_save(self._data())
+
+    def _data(self) -> dict[str, Any]:
+        return {
+            "alarms": [alarm.as_dict() for alarm in self.alarms.values()],
+            "runs": [run.as_dict() for run in self.runs.values() if not run.is_test],
+            "lights": self.remembered,
+        }
 
     # --- listeners --------------------------------------------------------
 
@@ -463,9 +492,9 @@ class AlarmClock:
             alarm.label = label.strip()
 
         if reschedule:
-            # Only a sunrise that hasn't rung yet is affected; lights that are
-            # already on after an alarm still turn off as planned.
-            self._cancel_sunrise(alarm_id)
+            # Only a sunrise that hasn't rung yet is affected (its lights go back to
+            # how they were); lights already on after an alarm turn off as planned.
+            self._end_sunrise(alarm_id)
             self._handled.pop(alarm_id, None)
             self._refresh_once_at(alarm)
         await self.async_save()
@@ -478,7 +507,7 @@ class AlarmClock:
         """Delete an alarm and its switch entity."""
         self._get(alarm_id)
         entity_id = self.alarm_entity_id(alarm_id)
-        self._cancel_sunrise(alarm_id)
+        self._end_sunrise(alarm_id)
         if unsub := self._timers.pop(alarm_id, None):
             unsub()
         self._handled.pop(alarm_id, None)
@@ -531,6 +560,7 @@ class AlarmClock:
         if self.runs.get(run.id) is not run:
             return
         del self.runs[run.id]
+        self.hush(run.touched)
         if run.phase is Phase.SUNRISE:
             # Stopped before it rang: this alarm moment is done.
             self._mark_handled(run)
@@ -575,10 +605,59 @@ class AlarmClock:
         self._schedule(alarm.id)
 
     @callback
-    def _cancel_sunrise(self, alarm_id: str) -> None:
+    def _end_sunrise(self, alarm_id: str) -> None:
+        """Stop this alarm's sunrise and put its lights back (in the background)."""
         if (run := self.sunrise_run(alarm_id)) is not None:
             run.async_cancel()
-            del self.runs[run.id]
+            del self.runs[run.id]  # done: this is not the alarm moment being handled
+            self.entry.async_create_task(
+                self.hass, run.async_stop(STOP_RESTORE), f"{DOMAIN} put lights back"
+            )
+
+    # --- remembered light settings ------------------------------------------
+
+    @callback
+    def hush(self, entity_ids: set[str]) -> None:
+        """A wake-up lets go of these lights: ignore their reports for a moment."""
+        until = dt_util.utcnow() + QUIET_TIME
+        for entity_id in entity_ids:
+            self._quiet_until[entity_id] = until
+
+    @callback
+    def _track_lights(self) -> None:
+        if self._unsub_lights is not None:
+            self._unsub_lights()
+        self._unsub_lights = async_track_state_change_event(
+            self.hass, self.lights, self._light_changed
+        )
+        for entity_id in self.lights:
+            if (state := self.hass.states.get(entity_id)) is not None:
+                self._remember(state)
+
+    @callback
+    def _light_changed(self, event: Event[EventStateChangedData]) -> None:
+        if (state := event.data["new_state"]) is not None:
+            self._remember(state)
+
+    @callback
+    def _remember(self, state: State) -> None:
+        """Note how someone set a light (not a wake-up)."""
+        if state.state != STATE_ON or self._set_by_wake_up(state):
+            return
+        settings = light_settings(state.attributes)
+        if settings and self.remembered.get(state.entity_id) != settings:
+            self.remembered[state.entity_id] = settings
+            self._store.async_delay_save(self._data, SAVE_DELAY)
+
+    def _set_by_wake_up(self, state: State) -> bool:
+        entity_id = state.entity_id
+        if (until := self._quiet_until.get(entity_id)) and dt_util.utcnow() < until:
+            return True
+        return any(
+            state.context.id == run.context.id
+            or (entity_id in run.touched and entity_id not in run.released)
+            for run in self.runs.values()
+        )
 
     @callback
     def _resume(self, run: WakeRun, now: datetime) -> None:
@@ -796,13 +875,16 @@ class WakeRun:
         elif action == STOP_FULL:
             await self._async_all_lights_full()
         elif action == STOP_OFF:
-            await self._async_turn_off(
-                [
-                    entity_id
-                    for entity_id in self.clock.lights
-                    if (state := self.hass.states.get(entity_id)) is not None
-                    and state.state == STATE_ON
-                ]
+            lights_on = [
+                entity_id
+                for entity_id in self.clock.lights
+                if (state := self.hass.states.get(entity_id)) is not None
+                and state.state == STATE_ON
+            ]
+            ours = set(self._ours())
+            await asyncio.gather(
+                self._async_reset_and_off([e for e in lights_on if e in ours]),
+                self._async_turn_off([e for e in lights_on if e not in ours]),
             )
         self.clock.run_finished(self)
 
@@ -888,7 +970,7 @@ class WakeRun:
         if self.is_test:
             await self._async_restore()
         else:
-            await self._async_turn_off(self._lights_still_ours())
+            await self._async_reset_and_off(self._lights_still_ours())
         self.clock.run_finished(self)
 
     # --- devices ----------------------------------------------------------
@@ -1056,19 +1138,83 @@ class WakeRun:
             result.append(entity_id)
         return result
 
+    def _ours(self) -> list[str]:
+        """Lights this run changed and nobody took over."""
+        return [
+            entity_id
+            for entity_id in self.clock.lights
+            if entity_id in self.touched and entity_id not in self.released
+        ]
+
     async def _async_restore(self) -> None:
         """Put the lights this run changed back to how they were."""
-        states = [
-            state
-            for state in self.snapshot
-            if state.entity_id in self.touched and state.entity_id not in self.released
+        before = {state.entity_id: state for state in self.snapshot}
+        were_on = [
+            before[entity_id]
+            for entity_id in self._ours()
+            if entity_id in before and before[entity_id].state == STATE_ON
         ]
+        were_off = [
+            entity_id
+            for entity_id in self._ours()
+            if entity_id not in before or before[entity_id].state != STATE_ON
+        ]
+        await asyncio.gather(
+            self._async_reproduce(were_on), self._async_reset_and_off(were_off)
+        )
+
+    async def _async_reproduce(self, states: list[State]) -> None:
         if not states:
             return
+        self.clock.hush({state.entity_id for state in states})
         try:
             await async_reproduce_state(self.hass, states, context=self.context)
         except (HomeAssistantError, vol.Invalid) as err:
             _LOGGER.warning("Could not restore the lights: %s", err)
+
+    async def _async_reset_and_off(self, entity_ids: list[str]) -> None:
+        """Back to their earlier brightness and color, then off.
+
+        A light that is off doesn't show (or take) a color, so it gets its earlier
+        settings while still on: switched on again later, it isn't stuck in the
+        sunrise's cool white.
+        """
+        self.clock.hush(set(entity_ids))
+        await asyncio.gather(
+            *(self._async_reset_and_off_one(entity_id) for entity_id in entity_ids)
+        )
+
+    async def _async_reset_and_off_one(self, entity_id: str) -> None:
+        if (state := self.hass.states.get(entity_id)) is None or state.state in _GONE:
+            return
+        if state.state == STATE_ON and (data := self._reset_data(state)):
+            await self._async_call(
+                LIGHT_DOMAIN, SERVICE_TURN_ON, {ATTR_ENTITY_ID: entity_id, **data}
+            )
+        await self._async_turn_off([entity_id])
+
+    def _reset_data(self, state: State) -> dict[str, Any]:
+        """light.turn_on data that puts a light back to its earlier settings."""
+        settings = self._settings_before(state.entity_id)
+        if settings.get(ATTR_BRIGHTNESS, 0) > (
+            state.attributes.get(ATTR_BRIGHTNESS) or 0
+        ):
+            # Never brighter than now, e.g. "as before" in the dark of the sunrise:
+            # the color alone is enough.
+            settings.pop(ATTR_BRIGHTNESS)
+        if settings and (
+            state.attributes.get(ATTR_SUPPORTED_FEATURES, 0)
+            & LightEntityFeature.TRANSITION
+        ):
+            settings[ATTR_TRANSITION] = 0
+        return settings
+
+    def _settings_before(self, entity_id: str) -> dict[str, Any]:
+        """How a light was before this run: as it was on then, or as last used."""
+        for state in self.snapshot:
+            if state.entity_id == entity_id and state.state == STATE_ON:
+                return light_settings(state.attributes)
+        return dict(self.clock.remembered.get(entity_id, {}))
 
     async def _async_turn_off(self, entity_ids: list[str]) -> None:
         if entity_ids:
