@@ -1,0 +1,52 @@
+# Dev instance: demo lights (RGBWW, RGBW, HS + color temp) plus a white-only
+# dimmable light, an on/off-only light and a "coffee machine" switch.
+default_config:
+demo:
+
+logger:
+  default: warning
+  logs:
+    custom_components.daytime_alarm: debug
+
+input_boolean:
+  nightstand_power:
+    name: Nightstand power
+  fairy_power:
+    name: Fairy lights power
+  coffee_machine:
+    name: Coffee machine
+    icon: mdi:coffee-maker
+
+input_number:
+  nightstand_level:
+    name: Nightstand level
+    min: 0
+    max: 255
+
+template:
+  - light:
+      - name: Nightstand
+        unique_id: dev_nightstand
+        state: "{{ is_state('input_boolean.nightstand_power', 'on') }}"
+        level: "{{ states('input_number.nightstand_level') | int(0) }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.nightstand_power }
+        turn_off:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.nightstand_power }
+        set_level:
+          - action: input_number.set_value
+            target: { entity_id: input_number.nightstand_level }
+            data: { value: "{{ brightness }}" }
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.nightstand_power }
+      - name: Fairy lights
+        unique_id: dev_fairy_lights
+        state: "{{ is_state('input_boolean.fairy_power', 'on') }}"
+        turn_on:
+          - action: input_boolean.turn_on
+            target: { entity_id: input_boolean.fairy_power }
+        turn_off:
+          - action: input_boolean.turn_off
+            target: { entity_id: input_boolean.fairy_power }

@@ -1,0 +1,184 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "New wake-up light",
+        "description": "Before each alarm the lights brighten slowly, like a sunrise. Switches turn on when the alarm rings.",
+        "data": {
+          "name": "Name",
+          "lights": "Lights",
+          "switches": "Switches",
+          "duration": "Sunrise duration",
+          "sunrise_colors": "Sunrise colors",
+          "lights_off_after": "Lights off after the alarm"
+        },
+        "data_description": {
+          "name": "For example the room, like \"Bedroom\".",
+          "lights": "Brighten from 0 to 100% during the sunrise. Lights that can only turn on and off are switched on at the alarm time.",
+          "switches": "Turn on at the alarm time, e.g. a coffee machine or a radio.",
+          "duration": "How long before the alarm the lights start to brighten.",
+          "sunrise_colors": "Color lights glow from deep red through orange to white; white lights go from warm to neutral white. When off, only the brightness changes.",
+          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
+        }
+      }
+    },
+    "error": {
+      "no_devices": "Select at least one light or switch."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wake-up light settings",
+        "description": "Before each alarm the lights brighten slowly, like a sunrise. Switches turn on when the alarm rings.",
+        "data": {
+          "lights": "Lights",
+          "switches": "Switches",
+          "duration": "Sunrise duration",
+          "sunrise_colors": "Sunrise colors",
+          "lights_off_after": "Lights off after the alarm"
+        },
+        "data_description": {
+          "lights": "Brighten from 0 to 100% during the sunrise. Lights that can only turn on and off are switched on at the alarm time.",
+          "switches": "Turn on at the alarm time, e.g. a coffee machine or a radio.",
+          "duration": "How long before the alarm the lights start to brighten.",
+          "sunrise_colors": "Color lights glow from deep red through orange to white; white lights go from warm to neutral white. When off, only the brightness changes.",
+          "lights_off_after": "If nobody stops the alarm, the lights turn off this many minutes after the alarm time. Lights you changed in the meantime are left alone; switches stay on. 0 keeps the lights on."
+        }
+      }
+    },
+    "error": {
+      "no_devices": "Select at least one light or switch."
+    }
+  },
+  "entity": {
+    "switch": {
+      "alarm": {
+        "name": "Alarm"
+      }
+    },
+    "sensor": {
+      "next_alarm": {
+        "name": "Next alarm"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "idle": "Idle",
+          "sunrise": "Sunrise",
+          "awake": "Awake"
+        }
+      }
+    },
+    "button": {
+      "stop_restore": {
+        "name": "Stop: lights as before"
+      },
+      "stop_full": {
+        "name": "Stop: full brightness"
+      },
+      "stop_off": {
+        "name": "Stop: all lights off"
+      },
+      "test": {
+        "name": "Test sunrise"
+      }
+    }
+  },
+  "selector": {
+    "weekday": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "stop_action": {
+      "options": {
+        "restore": "As before the sunrise",
+        "full": "Full brightness",
+        "off": "All lights off"
+      }
+    }
+  },
+  "services": {
+    "create_alarm": {
+      "name": "Create alarm",
+      "description": "Adds an alarm to a wake-up light.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wake-up light",
+          "description": "Only needed when you have more than one."
+        },
+        "time": {
+          "name": "Time",
+          "description": "When the alarm rings. The sunrise starts earlier."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to repeat on. Leave empty to ring once."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Optional name, e.g. \"Work\"."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the alarm is switched on."
+        }
+      }
+    },
+    "update_alarm": {
+      "name": "Update alarm",
+      "description": "Changes an alarm. Fields you leave out stay as they are.",
+      "fields": {
+        "time": {
+          "name": "Time",
+          "description": "When the alarm rings. The sunrise starts earlier."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days to repeat on. Empty list: ring once."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Optional name, e.g. \"Work\"."
+        },
+        "enabled": {
+          "name": "Enabled",
+          "description": "Whether the alarm is switched on."
+        }
+      }
+    },
+    "delete_alarm": {
+      "name": "Delete alarm",
+      "description": "Deletes an alarm."
+    },
+    "stop": {
+      "name": "Stop alarm",
+      "description": "Stops the sunrise or the lights-on phase after the alarm and decides what happens to the lights.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Wake-up light",
+          "description": "Only needed when you have more than one."
+        },
+        "action": {
+          "name": "Lights",
+          "description": "Restore them to how they were before the sunrise, go to full brightness, or turn them all off."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "No loaded wake-up light with entry ID {entry_id}."
+    },
+    "entry_required": {
+      "message": "Choose the wake-up light the alarm belongs to (config_entry_id)."
+    }
+  }
+}

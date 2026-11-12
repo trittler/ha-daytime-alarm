@@ -1,0 +1,13 @@
+{
+  "domain": "daytime_alarm",
+  "name": "Daytime Alarm",
+  "codeowners": ["@trittler"],
+  "config_flow": true,
+  "dependencies": ["frontend", "http"],
+  "documentation": "https://github.com/trittler/ha-daytime-alarm",
+  "integration_type": "device",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/trittler/ha-daytime-alarm/issues",
+  "requirements": [],
+  "version": "0.2.0"
+}

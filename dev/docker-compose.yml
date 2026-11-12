@@ -1,0 +1,13 @@
+# Local Home Assistant for developing the integration and card.
+# Start: docker compose up -d   →  http://localhost:8124
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2026.11.1
+    container_name: daytime-alarm-ha
+    ports:
+      - "8124:8123"
+    volumes:
+      - ./config:/config
+      - ../custom_components/daytime_alarm:/config/custom_components/daytime_alarm
+    environment:
+      TZ: Europe/Berlin

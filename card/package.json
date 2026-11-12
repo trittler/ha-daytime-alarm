@@ -1,0 +1,17 @@
+{
+  "name": "daytime-alarm-card",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/daytime-alarm-card.ts --bundle --format=esm --minify --target=es2022 --legal-comments=none --outfile=../custom_components/daytime_alarm/frontend/daytime-alarm-card.js",
+    "watch": "esbuild src/daytime-alarm-card.ts --bundle --format=esm --target=es2022 --outfile=../custom_components/daytime_alarm/frontend/daytime-alarm-card.js --watch"
+  },
+  "dependencies": {
+    "lit": "^3.3.3"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

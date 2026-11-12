@@ -1,0 +1,184 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Neuer Lichtwecker",
+        "description": "Vor jedem Wecker werden die Lampen langsam heller, wie bei einem Sonnenaufgang. Schalter gehen zur Weckzeit an.",
+        "data": {
+          "name": "Name",
+          "lights": "Lampen",
+          "switches": "Schalter",
+          "duration": "Dauer des Sonnenaufgangs",
+          "sunrise_colors": "Sonnenaufgangsfarben",
+          "lights_off_after": "Licht aus nach dem Wecker"
+        },
+        "data_description": {
+          "name": "Zum Beispiel der Raum, etwa „Schlafzimmer“.",
+          "lights": "Werden während des Sonnenaufgangs von 0 auf 100 % heller. Lampen, die nur an und aus können, gehen zur Weckzeit an.",
+          "switches": "Gehen zur Weckzeit an, z. B. Kaffeemaschine oder Radio.",
+          "duration": "Wie lange vor der Weckzeit die Lampen heller werden.",
+          "sunrise_colors": "Farbige Lampen glühen erst tiefrot, dann orange und zuletzt weiß; weiße Lampen gehen von warm- zu neutralweiß. Aus: nur die Helligkeit ändert sich.",
+          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
+        }
+      }
+    },
+    "error": {
+      "no_devices": "Wähle mindestens eine Lampe oder einen Schalter."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Einstellungen des Lichtweckers",
+        "description": "Vor jedem Wecker werden die Lampen langsam heller, wie bei einem Sonnenaufgang. Schalter gehen zur Weckzeit an.",
+        "data": {
+          "lights": "Lampen",
+          "switches": "Schalter",
+          "duration": "Dauer des Sonnenaufgangs",
+          "sunrise_colors": "Sonnenaufgangsfarben",
+          "lights_off_after": "Licht aus nach dem Wecker"
+        },
+        "data_description": {
+          "lights": "Werden während des Sonnenaufgangs von 0 auf 100 % heller. Lampen, die nur an und aus können, gehen zur Weckzeit an.",
+          "switches": "Gehen zur Weckzeit an, z. B. Kaffeemaschine oder Radio.",
+          "duration": "Wie lange vor der Weckzeit die Lampen heller werden.",
+          "sunrise_colors": "Farbige Lampen glühen erst tiefrot, dann orange und zuletzt weiß; weiße Lampen gehen von warm- zu neutralweiß. Aus: nur die Helligkeit ändert sich.",
+          "lights_off_after": "Wenn niemand den Wecker stoppt, gehen die Lampen so viele Minuten nach der Weckzeit aus. Lampen, die du inzwischen verändert hast, bleiben, wie sie sind; Schalter bleiben an. 0 lässt das Licht an."
+        }
+      }
+    },
+    "error": {
+      "no_devices": "Wähle mindestens eine Lampe oder einen Schalter."
+    }
+  },
+  "entity": {
+    "switch": {
+      "alarm": {
+        "name": "Wecker"
+      }
+    },
+    "sensor": {
+      "next_alarm": {
+        "name": "Nächster Wecker"
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "idle": "Bereit",
+          "sunrise": "Sonnenaufgang",
+          "awake": "Wach"
+        }
+      }
+    },
+    "button": {
+      "stop_restore": {
+        "name": "Stopp: Licht wie vorher"
+      },
+      "stop_full": {
+        "name": "Stopp: volle Helligkeit"
+      },
+      "stop_off": {
+        "name": "Stopp: alle Lampen aus"
+      },
+      "test": {
+        "name": "Sonnenaufgang testen"
+      }
+    }
+  },
+  "selector": {
+    "weekday": {
+      "options": {
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag"
+      }
+    },
+    "stop_action": {
+      "options": {
+        "restore": "Wie vor dem Sonnenaufgang",
+        "full": "Volle Helligkeit",
+        "off": "Alle Lampen aus"
+      }
+    }
+  },
+  "services": {
+    "create_alarm": {
+      "name": "Wecker erstellen",
+      "description": "Fügt einem Lichtwecker einen Wecker hinzu.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Lichtwecker",
+          "description": "Nur nötig, wenn du mehr als einen hast."
+        },
+        "time": {
+          "name": "Uhrzeit",
+          "description": "Wann der Wecker klingelt. Der Sonnenaufgang beginnt vorher."
+        },
+        "days": {
+          "name": "Tage",
+          "description": "Wochentage, an denen er wiederholt wird. Leer: nur einmal."
+        },
+        "label": {
+          "name": "Name",
+          "description": "Optionaler Name, z. B. „Arbeit“."
+        },
+        "enabled": {
+          "name": "Aktiv",
+          "description": "Ob der Wecker eingeschaltet ist."
+        }
+      }
+    },
+    "update_alarm": {
+      "name": "Wecker ändern",
+      "description": "Ändert einen Wecker. Weggelassene Felder bleiben, wie sie sind.",
+      "fields": {
+        "time": {
+          "name": "Uhrzeit",
+          "description": "Wann der Wecker klingelt. Der Sonnenaufgang beginnt vorher."
+        },
+        "days": {
+          "name": "Tage",
+          "description": "Wochentage, an denen er wiederholt wird. Leere Liste: nur einmal."
+        },
+        "label": {
+          "name": "Name",
+          "description": "Optionaler Name, z. B. „Arbeit“."
+        },
+        "enabled": {
+          "name": "Aktiv",
+          "description": "Ob der Wecker eingeschaltet ist."
+        }
+      }
+    },
+    "delete_alarm": {
+      "name": "Wecker löschen",
+      "description": "Löscht einen Wecker."
+    },
+    "stop": {
+      "name": "Wecker stoppen",
+      "description": "Stoppt den Sonnenaufgang oder die Lichtphase nach dem Wecker und legt fest, was mit dem Licht passiert.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Lichtwecker",
+          "description": "Nur nötig, wenn du mehr als einen hast."
+        },
+        "action": {
+          "name": "Licht",
+          "description": "Wie vor dem Sonnenaufgang wiederherstellen, volle Helligkeit oder alle Lampen aus."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Kein geladener Lichtwecker mit der Entry-ID {entry_id}."
+    },
+    "entry_required": {
+      "message": "Wähle den Lichtwecker, zu dem der Wecker gehört (config_entry_id)."
+    }
+  }
+}

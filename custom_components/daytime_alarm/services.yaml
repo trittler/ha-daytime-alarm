@@ -1,0 +1,62 @@
+create_alarm:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: daytime_alarm
+    time:
+      required: true
+      example: "07:00"
+      selector:
+        time:
+    days: &days
+      example: '["mon", "tue", "wed", "thu", "fri"]'
+      selector:
+        select:
+          multiple: true
+          translation_key: weekday
+          options: [mon, tue, wed, thu, fri, sat, sun]
+    label: &label
+      example: "Work"
+      selector:
+        text:
+    enabled:
+      default: true
+      selector:
+        boolean:
+
+update_alarm:
+  target:
+    entity:
+      integration: daytime_alarm
+      domain: switch
+  fields:
+    time:
+      example: "07:00"
+      selector:
+        time:
+    days: *days
+    label: *label
+    enabled:
+      selector:
+        boolean:
+
+delete_alarm:
+  target:
+    entity:
+      integration: daytime_alarm
+      domain: switch
+
+stop:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: daytime_alarm
+    action:
+      required: true
+      example: restore
+      selector:
+        select:
+          translation_key: stop_action
+          options: [restore, full, "off"]

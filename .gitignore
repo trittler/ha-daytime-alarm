@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.pyc
+dev/config/*
+!dev/config/configuration.yaml
+dev/.dev-credentials
+.venv/
+.ruff_cache/
